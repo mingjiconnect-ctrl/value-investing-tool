@@ -1,0 +1,6 @@
+name: bull
+revenue_growth: [0.12, 0.10, 0.09, 0.08, 0.06]
+fcf_margin: [0.16, 0.18, 0.19, 0.20, 0.21]
+wacc: 0.085
+terminal_g: 0.035
+exit_multiple: 16

@@ -1,0 +1,10 @@
+default_scenario: base
+currency: USD
+time_unit: year
+tax_rate: 0.21
+shares_outstanding: 100000000
+net_debt: 50000000
+mos_discount: 0.25
+explicit_years: 5
+maint_capex_ratio: 0.4
+sbc_adjust_ratio: 1.0

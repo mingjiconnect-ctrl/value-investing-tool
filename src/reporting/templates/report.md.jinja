@@ -1,0 +1,42 @@
+# Value Investing Research Report
+
+## Data Provenance
+All numerical outputs in this report are sourced from generated artifacts under `outputs/`.
+
+## Scenarios
+| Scenario | EV | Equity Value | Intrinsic/Share | MOS Buy Price |
+|---|---:|---:|---:|---:|
+{% for name, v in scenarios.items() -%}
+| {{name}} | {{"%.2f"|format(v.ev)}} | {{"%.2f"|format(v.equity_value)}} | {{"%.4f"|format(v.intrinsic_value_per_share)}} | {{"%.4f"|format(v.mos_buy_price)}} |
+{% endfor %}
+
+## Owner Earnings Formula
+`OE = NetIncome + D&A - MaintCapex - ΔWorkingCapital - SBC_adjust + OneOffAdjustments`
+
+## DCF Formula and Parameters
+- Explicit forecast years: {{ explicit_years }}
+- Discounting: `PV = Σ(FCF_t / (1+WACC)^t) + TV/(1+WACC)^N`
+- Gordon Terminal Value: `TV = FCF_(N+1)/(WACC-g)`
+- Alternate terminal method supported by interface: Exit Multiple.
+- Boundary condition: `WACC > terminal_g` (validation error otherwise).
+
+## Sensitivity (WACC × terminal g)
+See `outputs/sensitivity_wacc_g.csv` and chart `outputs/charts/sensitivity_wacc_g.png`.
+
+## Risk & Drawdown
+- Monte Carlo valuation score p5/p50/p95: {{ mc_stats.p5 }}, {{ mc_stats.p50 }}, {{ mc_stats.p95 }}
+- Max drawdown distribution p5/p50/p95: {{ dd_stats.p5 }}, {{ dd_stats.p50 }}, {{ dd_stats.p95 }}
+
+## Portfolio & Kelly
+- Kelly weights (constrained): {{ kelly_weights }}
+- Portfolio expected return: {{ portfolio_expected_return }}
+
+## Boundary Conditions / Applicability
+{% for b in boundaries %}
+- **{{ b.name }}**: {{ b.condition }} ({{ b.rationale }})
+{% endfor %}
+
+## Falsification Criteria
+- If normalized owner earnings trend turns negative for 2+ years, bullish conclusion is falsified.
+- If required return proxy (WACC) rises above sensitivity grid max, valuation confidence is invalid.
+- If terminal growth assumption exceeds long-run nominal GDP proxy, conclusion is invalid.
