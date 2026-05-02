@@ -1,0 +1,41 @@
+name: SEC Access Smoke Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths: [".github/workflows/sec-smoke.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test SEC companyfacts access
+        run: |
+          python - <<'PY'
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError
+
+          url = "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json"
+          agents = [
+              "sp500-monitor/0.1 https://github.com/mingjiconnect-ctrl/value-investing-tool",
+              "sp500-monitor/0.1 (https://github.com/mingjiconnect-ctrl/value-investing-tool; contact via GitHub Issues)",
+              "sp500-monitor/0.1 contact@example.com",
+          ]
+          ok = False
+          for ua in agents:
+              try:
+                  req = Request(url, headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate", "Accept": "application/json"})
+                  with urlopen(req, timeout=20) as resp:
+                      print(resp.status, ua, resp.headers.get("content-type"))
+                      ok = ok or resp.status == 200
+              except HTTPError as exc:
+                  print(exc.code, ua)
+              except Exception as exc:
+                  print(type(exc).__name__, ua, exc)
+          if not ok:
+              raise SystemExit("SEC companyfacts unavailable from this runner")
+          PY
