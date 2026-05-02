@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import gzip
 import json
 import math
 import os
@@ -18,11 +20,15 @@ ROOT = Path.cwd()
 CACHE = ROOT / "data" / "cache"
 OUT = ROOT / "data" / "latest_rankings.json"
 DIST = ROOT / "dist"
+FUNDAMENTALS_SNAPSHOT = ROOT / "data" / "fundamentals_snapshot.json"
+FUNDAMENTALS_SNAPSHOT_GZ = ROOT / "data" / "fundamentals_snapshot.json.gz"
+FUNDAMENTALS_SNAPSHOT_B64 = ROOT / "data" / "fundamentals_snapshot.json.gz.b64"
 WIKI_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
 YAHOO_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=1d&interval=1d"
 SEC_UA = os.environ.get("SEC_USER_AGENT", "sp500-monitor/0.1 contact@example.com")
 EXCLUDED_SECTORS = {"Financials", "Real Estate", "Utilities"}
+_FUNDAMENTALS_SNAPSHOT_CACHE: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -92,7 +98,10 @@ def get(url: str, headers: dict[str, str], timeout: int = 30, attempts: int = 3)
     for n in range(attempts):
         try:
             with urlopen(Request(url, headers=headers), timeout=timeout) as r:
-                return r.read()
+                data = r.read()
+                if r.headers.get("Content-Encoding", "").lower() == "gzip":
+                    return gzip.decompress(data)
+                return data
         except Exception as exc:  # noqa: BLE001 - network retry boundary
             last = exc
             if n == attempts - 1:
@@ -211,7 +220,32 @@ def cagr(history: list[dict[str, Any]], periods: int = 3) -> float | None:
 
 
 def facts(cik: str) -> dict[str, Any]:
-    return cache_json(f"companyfacts_{cik}.json", FACTS_URL.format(cik=cik), 12, {"User-Agent": SEC_UA})
+    return cache_json(
+        f"companyfacts_{cik}.json",
+        FACTS_URL.format(cik=cik),
+        12,
+        {"User-Agent": SEC_UA, "Accept": "application/json", "Accept-Encoding": "gzip"},
+    )
+
+
+def fundamentals_snapshot() -> dict[str, Any]:
+    global _FUNDAMENTALS_SNAPSHOT_CACHE
+    if _FUNDAMENTALS_SNAPSHOT_CACHE is None:
+        if FUNDAMENTALS_SNAPSHOT.exists():
+            _FUNDAMENTALS_SNAPSHOT_CACHE = json.loads(FUNDAMENTALS_SNAPSHOT.read_text(encoding="utf-8"))
+        elif FUNDAMENTALS_SNAPSHOT_GZ.exists():
+            _FUNDAMENTALS_SNAPSHOT_CACHE = json.loads(gzip.decompress(FUNDAMENTALS_SNAPSHOT_GZ.read_bytes()).decode("utf-8"))
+        elif FUNDAMENTALS_SNAPSHOT_B64.exists():
+            raw = base64.b64decode(FUNDAMENTALS_SNAPSHOT_B64.read_text(encoding="utf-8"))
+            _FUNDAMENTALS_SNAPSHOT_CACHE = json.loads(gzip.decompress(raw).decode("utf-8"))
+        else:
+            _FUNDAMENTALS_SNAPSHOT_CACHE = {"fundamentals": {}}
+    return _FUNDAMENTALS_SNAPSHOT_CACHE
+
+
+def snapshot_fundamentals(cik: str) -> dict[str, Any] | None:
+    record = fundamentals_snapshot().get("fundamentals", {}).get(cik)
+    return dict(record) if isinstance(record, dict) else None
 
 
 def fundamentals(raw: dict[str, Any]) -> dict[str, Any]:
@@ -415,8 +449,14 @@ def run(limit: int, pause: float) -> dict[str, Any]:
             f = fundamentals(facts(c.cik))
             time.sleep(pause)
         except Exception as exc:  # noqa: BLE001
-            err = f"fundamentals_error:{type(exc).__name__}:{exc}"
-            errors.append({"ticker": c.ticker, "stage": "fundamentals", "error": str(exc)})
+            fallback = snapshot_fundamentals(c.cik) if c.cik else None
+            if fallback:
+                f = fallback
+                err = f"fundamentals_snapshot_fallback:live_sec_{type(exc).__name__}:{exc}"
+                errors.append({"ticker": c.ticker, "stage": "fundamentals_live", "error": str(exc), "fallback": "fundamentals_snapshot"})
+            else:
+                err = f"fundamentals_error:{type(exc).__name__}:{exc}"
+                errors.append({"ticker": c.ticker, "stage": "fundamentals", "error": str(exc)})
         try:
             q = price(c.ticker)
             time.sleep(max(0.03, pause / 2))
@@ -438,6 +478,7 @@ def run(limit: int, pause: float) -> dict[str, Any]:
             "growth_rankable_companies": len(growth),
             "source_notes": [
                 "Financial statements: SEC EDGAR companyfacts.",
+                "If live SEC companyfacts is unavailable, the cloud build uses a committed SEC-derived fundamentals snapshot and marks each fallback row in source_notes.",
                 "S&P 500 constituents: Wikipedia table for this MVP; replace with licensed index data in production.",
                 "Market prices: Yahoo chart endpoint for this MVP; replace with licensed market data in production.",
                 "Valuation: Python owner-earnings DCF using Base/Bull/Black Swan weighted fair value.",
@@ -446,6 +487,8 @@ def run(limit: int, pause: float) -> dict[str, Any]:
                 "Financials, Real Estate, and Utilities are flagged out until sector-specific valuation modules are added.",
             ],
             "ranking_weights": {"value": {"discount_score": 0.35, "buffett_score": 0.35, "moat_score": 0.20, "data_score": 0.10}, "growth": {"discount_score": 0.25, "lynch_score": 0.40, "fisher_score": 0.30, "data_score": 0.05}},
+            "fundamentals_snapshot_generated_at": fundamentals_snapshot().get("generated_at"),
+            "fallback_fundamentals_companies": sum(any("fundamentals_snapshot_fallback" in note for note in r["source_notes"]) for r in rows),
             "errors": errors,
         },
         "value_top_10": values[:10],
@@ -476,12 +519,23 @@ def build(payload: dict[str, Any]) -> None:
     (DIST / "manifest.json").write_text(json.dumps({"built_at": datetime.now(timezone.utc).isoformat(), **payload["metadata"]}, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def validate_payload(payload: dict[str, Any]) -> None:
+    meta = payload["metadata"]
+    if meta["processed_companies"] < 450:
+        raise SystemExit(f"Refusing to deploy incomplete universe: {meta['processed_companies']} processed")
+    if meta["rankable_companies"] < 20:
+        raise SystemExit(f"Refusing to deploy empty or low-quality rankings: {meta['rankable_companies']} rankable")
+    if len(payload["value_top_10"]) < 10 or len(payload["growth_top_10"]) < 10:
+        raise SystemExit("Refusing to deploy incomplete top-10 lists")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--sleep", type=float, default=0.05)
     args = parser.parse_args()
     payload = run(args.limit, args.sleep)
+    validate_payload(payload)
     build(payload)
     m = payload["metadata"]
     print(f"Built S&P 500 monitor: {m['rankable_companies']} rankable / {m['processed_companies']} processed")
