@@ -1,0 +1,61 @@
+name: Refresh and Deploy S&P 500 Monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 21:30 UTC Monday-Friday = 05:30 Asia/Shanghai Tuesday-Saturday.
+    # This runs after the regular US market close in both EST and EDT.
+    - cron: "30 21 * * 1-5"
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Generate full S&P 500 rankings
+        env:
+          SEC_USER_AGENT: "sp500-monitor/0.1 https://github.com/${{ github.repository }}"
+        run: python cloud_pages_monitor.py --limit 0 --sleep 0.05
+
+      - name: Validate generated artifacts
+        run: |
+          python -m json.tool data/latest_rankings.json >/dev/null
+          python -m json.tool dist/data/latest_rankings.json >/dev/null
+          python -m json.tool dist/manifest.json >/dev/null
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
