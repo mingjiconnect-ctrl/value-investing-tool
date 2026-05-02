@@ -14,7 +14,6 @@ permissions:
 
 env:
   SOURCE_BASE: "https://6e9ef70c1a49e7.lhr.life"
-  SEC_USER_AGENT: "sp500-monitor/0.1 https://github.com/${{ github.repository }} contact:mingjiconnect@gmail.com"
 
 concurrency:
   group: "pages"
@@ -29,77 +28,36 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Import audit-enabled source files
+      - name: Import audit-enabled source and prepared SEC snapshot
         run: |
           mkdir -p .github/workflows data
           curl -fL --retry 5 --retry-delay 5 "$SOURCE_BASE/cloud_pages_monitor.py" -o cloud_pages_monitor.py
           curl -fL --retry 5 --retry-delay 5 "$SOURCE_BASE/.github/workflows/refresh-sec-snapshot.yml" -o .github/workflows/refresh-sec-snapshot.yml
+          curl -fL --retry 5 --retry-delay 5 "$SOURCE_BASE/fundamentals_snapshot.json.gz.b64" -o data/fundamentals_snapshot.json.gz.b64
           python -m py_compile cloud_pages_monitor.py
 
-      - name: Download SEC companyfacts bulk archive
-        run: |
-          curl -fL --retry 5 --retry-delay 10 \
-            -H "User-Agent: $SEC_USER_AGENT" \
-            -H "Accept-Encoding: gzip" \
-            https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip \
-            -o data/companyfacts.zip
-
-      - name: Build SEC fundamentals snapshot with audit facts
+      - name: Validate and split SEC audit snapshot
         run: |
           python - <<'PY'
-          import base64
-          import gzip
-          import json
-          import zipfile
-          from datetime import datetime, timezone
+          import base64, gzip, json
           from pathlib import Path
-
-          import cloud_pages_monitor as monitor
-
-          universe = monitor.sp500()
-          fundamentals = {}
-          missing = []
-          failed = []
-          zip_path = Path("data/companyfacts.zip")
-          with zipfile.ZipFile(zip_path) as zf:
-              names = set(zf.namelist())
-              for company in universe:
-                  if not company.cik:
-                      missing.append({"ticker": company.ticker, "reason": "missing_cik"})
-                      continue
-                  member = f"CIK{company.cik}.json"
-                  if member not in names:
-                      missing.append({"ticker": company.ticker, "cik": company.cik, "reason": "missing_companyfacts_json"})
-                      continue
-                  try:
-                      raw = json.loads(zf.read(member).decode("utf-8"))
-                      fundamentals[company.cik] = monitor.fundamentals(raw)
-                  except Exception as exc:  # noqa: BLE001
-                      failed.append({"ticker": company.ticker, "cik": company.cik, "error": f"{type(exc).__name__}:{exc}"})
-          if len(fundamentals) < 450:
-              raise SystemExit(f"weak SEC snapshot: {len(fundamentals)} companies; missing={len(missing)} failed={len(failed)}")
-          snapshot = {
-              "generated_at": datetime.now(timezone.utc).isoformat(),
-              "source": "SEC EDGAR companyfacts bulk ZIP",
-              "source_url": "https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip",
-              "universe": "S&P 500",
-              "company_count": len(fundamentals),
-              "missing": missing[:100],
-              "failed": failed[:100],
-              "fundamentals": fundamentals,
-          }
-          raw = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-          encoded = base64.b64encode(gzip.compress(raw, mtime=0)).decode("ascii")
-          Path("data/fundamentals_snapshot.json.gz.b64").write_text(encoded, encoding="utf-8")
-          print(f"SEC fundamentals snapshot companies: {len(fundamentals)}")
+          raw = base64.b64decode(Path("data/fundamentals_snapshot.json.gz.b64").read_text())
+          snapshot = json.loads(gzip.decompress(raw).decode("utf-8"))
+          count = len(snapshot.get("fundamentals", {}))
+          if count < 450:
+              raise SystemExit(f"weak fundamentals snapshot: {count} companies")
+          first = next(iter(snapshot.get("fundamentals", {}).values()))
+          if not ((first.get("data_audit") or {}).get("selected_facts")):
+              raise SystemExit("snapshot lacks tag-level SEC audit facts")
+          print(f"SEC fundamentals snapshot companies: {count}")
           PY
+          rm -f data/fundamentals_snapshot.part*
+          split -b 5000 -d -a 3 data/fundamentals_snapshot.json.gz.b64 data/fundamentals_snapshot.part
+          rm -f data/fundamentals_snapshot.json.gz.b64
+          date -u +%Y-%m-%dT%H:%M:%SZ > data/deploy_trigger.txt
 
       - name: Commit imported source and refreshed snapshot
         run: |
-          rm -f data/fundamentals_snapshot.part*
-          split -b 5000 -d -a 3 data/fundamentals_snapshot.json.gz.b64 data/fundamentals_snapshot.part
-          rm -f data/fundamentals_snapshot.json.gz.b64 data/companyfacts.zip
-          date -u +%Y-%m-%dT%H:%M:%SZ > data/deploy_trigger.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add cloud_pages_monitor.py .github/workflows/refresh-sec-snapshot.yml data/fundamentals_snapshot.part* data/deploy_trigger.txt
@@ -110,16 +68,6 @@ jobs:
       - name: Rebuild fundamentals snapshot
         run: |
           cat data/fundamentals_snapshot.part* | tr -d '\n' > data/fundamentals_snapshot.json.gz.b64
-          python - <<'PY'
-          import base64, gzip, json
-          from pathlib import Path
-          raw = base64.b64decode(Path("data/fundamentals_snapshot.json.gz.b64").read_text())
-          snapshot = json.loads(gzip.decompress(raw).decode("utf-8"))
-          count = len(snapshot.get("fundamentals", {}))
-          if count < 450:
-              raise SystemExit(f"weak fundamentals snapshot: {count} companies")
-          print(f"SEC fundamentals snapshot companies: {count}")
-          PY
 
       - name: Generate full S&P 500 rankings
         env:
@@ -136,13 +84,17 @@ jobs:
           import json
           from pathlib import Path
           data = json.loads(Path("data/latest_rankings.json").read_text())
-          rows = data.get("ranked") or []
-          if not rows:
-              raise SystemExit("no rankable rows generated")
+          rows = data.get("companies") or []
+          rankable = data.get("metadata", {}).get("rankable_companies", 0)
+          if rankable < 10:
+              raise SystemExit(f"too few rankable rows: {rankable}")
           missing_audit = [r.get("ticker") for r in rows if "audit" not in r]
           if missing_audit:
               raise SystemExit(f"missing audit payload for {missing_audit[:5]}")
-          print(f"rankable rows: {len(rows)}")
+          fact_rows = sum(len(((r.get("audit") or {}).get("sec_facts") or {})) for r in rows)
+          if fact_rows < 500:
+              raise SystemExit(f"too few SEC fact audit entries: {fact_rows}")
+          print(f"processed rows: {len(rows)}; rankable rows: {rankable}; SEC fact fields: {fact_rows}")
           PY
 
       - name: Configure GitHub Pages
