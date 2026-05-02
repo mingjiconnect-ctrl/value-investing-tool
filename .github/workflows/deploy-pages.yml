@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   schedule:
     # 21:30 UTC Monday-Friday = 05:30 Asia/Shanghai Tuesday-Saturday.
-    # This runs after the regular US market close in both EST and EDT.
+    # Runs after the regular US market close in both EST and EDT.
     - cron: "30 21 * * 1-5"
   push:
     branches: ["main"]
@@ -25,6 +25,14 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Restore data cache
+        uses: actions/cache@v4
+        with:
+          path: data/cache
+          key: sp500-monitor-cache-${{ github.run_id }}
+          restore-keys: |
+            sp500-monitor-cache-
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -32,52 +40,9 @@ jobs:
 
       - name: Generate full S&P 500 rankings
         env:
-          SEC_USER_AGENT: "sp500-monitor/0.1 https://github.com/${{ github.repository }}"
+          SEC_USER_AGENT: "sp500-monitor/0.1 https://github.com/${{ github.repository }} contact:mingjiconnect@gmail.com"
         run: |
-          mkdir -p data
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          Path("data/fundamentals_snapshot.json.gz.b64").write_text("""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""", encoding="utf-8")
-
-          import cloud_pages_monitor as monitor
-
-          snapshot = monitor.fundamentals_snapshot()
-          universe = monitor.sp500()
-          allowed = {c.ticker for c in universe if c.cik in snapshot.get("fundamentals", {})}
-          original_price = monitor.price
-
-          monitor.print = lambda *args, **kwargs: None
-          monitor.sp500 = lambda: universe
-
-          def prefer_snapshot_facts(cik):
-              raise RuntimeError("prefer_fundamentals_snapshot")
-
-          def candidate_price(ticker):
-              if ticker not in allowed:
-                  return {"price": None, "currency": None, "market_time": None}
-              return original_price(ticker)
-
-          monitor.facts = prefer_snapshot_facts
-          monitor.price = candidate_price
-          payload = monitor.run(0, 0.0)
-          payload["metadata"]["errors"] = [
-              e for e in payload["metadata"]["errors"]
-              if e.get("error") != "prefer_fundamentals_snapshot"
-          ]
-          payload["metadata"]["source_notes"].insert(
-              1,
-              "Cloud deploy uses a committed SEC-derived MVP fundamentals snapshot for current rankable candidates; market prices are refreshed during each run.",
-          )
-          monitor.OUT.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-          monitor.validate_payload(payload)
-          monitor.build(payload)
-          meta = payload["metadata"]
-          print(f"Built S&P 500 monitor: {meta['rankable_companies']} rankable / {meta['processed_companies']} processed")
-          print("Value top 10:", ", ".join(r["ticker"] for r in payload["value_top_10"]))
-          print("Growth top 10:", ", ".join(r["ticker"] for r in payload["growth_top_10"]))
-          PY
+          python cloud_pages_monitor.py --limit 0 --sleep 0.12
 
       - name: Validate generated artifacts
         run: |
