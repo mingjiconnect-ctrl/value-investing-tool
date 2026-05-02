@@ -8,6 +8,9 @@ on:
     - cron: "30 21 * * 1-5"
   push:
     branches: ["main"]
+    paths-ignore:
+      - ".github/workflows/deploy-pages.yml"
+      - ".github/workflows/import-snapshot.yml"
 
 permissions:
   contents: read
@@ -38,11 +41,31 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Rebuild fundamentals snapshot
+        run: |
+          mkdir -p data
+          if ! compgen -G "data/fundamentals_snapshot.part*" > /dev/null; then
+            echo "Missing committed SEC fundamentals snapshot parts."
+            exit 1
+          fi
+          cat data/fundamentals_snapshot.part* | tr -d '\n' > data/fundamentals_snapshot.json.gz.b64
+          python - <<'PY'
+          import base64, gzip, json
+          from pathlib import Path
+          raw = base64.b64decode(Path("data/fundamentals_snapshot.json.gz.b64").read_text())
+          snapshot = json.loads(gzip.decompress(raw).decode("utf-8"))
+          count = len(snapshot.get("fundamentals", {}))
+          if count < 450:
+              raise SystemExit(f"weak fundamentals snapshot: {count} companies")
+          print(f"SEC fundamentals snapshot companies: {count}")
+          PY
+
       - name: Generate full S&P 500 rankings
         env:
           SEC_USER_AGENT: "sp500-monitor/0.1 https://github.com/${{ github.repository }} contact:mingjiconnect@gmail.com"
+          PREFER_FUNDAMENTALS_SNAPSHOT: "1"
         run: |
-          python cloud_pages_monitor.py --limit 0 --sleep 0.12
+          python cloud_pages_monitor.py --limit 0 --sleep 0.0
 
       - name: Validate generated artifacts
         run: |

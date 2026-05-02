@@ -1,0 +1,55 @@
+name: Import SEC Fundamentals Snapshot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/import-snapshot.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download and verify snapshot
+        env:
+          SNAPSHOT_URL: "https://46db333c40c959.lhr.life/data/fundamentals_snapshot.json.gz.b64"
+        run: |
+          mkdir -p data
+          curl -fL --retry 3 --retry-delay 2 "$SNAPSHOT_URL" -o data/fundamentals_snapshot.json.gz.b64
+          python - <<'PY'
+          import base64, gzip, json
+          from pathlib import Path
+          raw = base64.b64decode(Path("data/fundamentals_snapshot.json.gz.b64").read_text())
+          snapshot = json.loads(gzip.decompress(raw).decode("utf-8"))
+          count = len(snapshot.get("fundamentals", {}))
+          generated_at = snapshot.get("generated_at")
+          if count < 450:
+              raise SystemExit(f"weak fundamentals snapshot: {count} companies")
+          print(f"SEC fundamentals snapshot companies: {count}; generated_at={generated_at}")
+          PY
+
+      - name: Commit snapshot parts
+        run: |
+          rm -f data/fundamentals_snapshot.part*
+          split -b 5000 -d -a 3 data/fundamentals_snapshot.json.gz.b64 data/fundamentals_snapshot.part
+          rm -f data/fundamentals_snapshot.json.gz.b64
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/fundamentals_snapshot.part*
+          git rm -f .github/workflows/import-snapshot.yml
+          git commit -m "Import SEC fundamentals snapshot"
+          git push
