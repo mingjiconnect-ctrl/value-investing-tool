@@ -1,7 +1,874 @@
 from __future__ import annotations
 
+import argparse
 import base64
 import gzip
+import json
+import math
+import os
+import re
+import time
+from dataclasses import asdict, dataclass
+from datetime import date, datetime, timedelta, timezone
+from html.parser import HTMLParser
+from pathlib import Path
+from typing import Any
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
-_PAYLOAD = "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"
-exec(gzip.decompress(base64.b64decode(_PAYLOAD)).decode("utf-8"))
+ROOT = Path.cwd()
+CACHE = ROOT / "data" / "cache"
+OUT = ROOT / "data" / "latest_rankings.json"
+DIST = ROOT / "dist"
+FUNDAMENTALS_SNAPSHOT = ROOT / "data" / "fundamentals_snapshot.json"
+FUNDAMENTALS_SNAPSHOT_GZ = ROOT / "data" / "fundamentals_snapshot.json.gz"
+FUNDAMENTALS_SNAPSHOT_B64 = ROOT / "data" / "fundamentals_snapshot.json.gz.b64"
+EMBEDDED_FUNDAMENTALS_SNAPSHOT_B64 = ""
+WIKI_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+YAHOO_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=1d&interval=1d"
+STOOQ_URL = "https://stooq.com/q/l/?s={ticker}.us&f=sd2t2ohlcv&h&e=csv"
+SHILLER_PE_URL = "https://www.multpl.com/shiller-pe"
+CNN_FEAR_GREED_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+SEC_UA = os.environ.get("SEC_USER_AGENT", "sp500-monitor/0.1 contact@example.com")
+PREFER_FUNDAMENTALS_SNAPSHOT = os.environ.get("PREFER_FUNDAMENTALS_SNAPSHOT") == "1"
+EXCLUDED_SECTORS = {"Financials", "Real Estate", "Utilities"}
+_FUNDAMENTALS_SNAPSHOT_CACHE: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class Company:
+    ticker: str
+    name: str
+    sector: str
+    industry: str
+    cik: str | None
+
+
+class TableParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.in_table = False
+        self.done = False
+        self.in_row = False
+        self.in_cell = False
+        self.skip = 0
+        self.row: list[str] = []
+        self.cell: list[str] = []
+        self.rows: list[list[str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attrs_d = {k: v or "" for k, v in attrs}
+        if tag == "table" and not self.in_table and not self.done and "wikitable" in attrs_d.get("class", ""):
+            self.in_table = True
+            return
+        if not self.in_table:
+            return
+        if tag in {"script", "style", "sup"}:
+            self.skip += 1
+        elif tag == "tr":
+            self.in_row = True
+            self.row = []
+        elif tag in {"td", "th"} and self.in_row:
+            self.in_cell = True
+            self.cell = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self.in_table:
+            return
+        if tag in {"script", "style", "sup"} and self.skip:
+            self.skip -= 1
+        elif tag in {"td", "th"} and self.in_cell:
+            self.row.append(clean(" ".join(self.cell)))
+            self.in_cell = False
+        elif tag == "tr" and self.in_row:
+            if self.row:
+                self.rows.append(self.row)
+            self.in_row = False
+        elif tag == "table":
+            self.in_table = False
+            self.done = True
+
+    def handle_data(self, data: str) -> None:
+        if self.in_table and self.in_cell and not self.skip:
+            self.cell.append(data)
+
+
+def clean(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"\[[^\]]+\]", "", text).replace("\xa0", " ")).strip()
+
+
+def get(url: str, headers: dict[str, str], timeout: int = 30, attempts: int = 3) -> bytes:
+    last: Exception | None = None
+    for n in range(attempts):
+        try:
+            with urlopen(Request(url, headers=headers), timeout=timeout) as r:
+                data = r.read()
+                if r.headers.get("Content-Encoding", "").lower() == "gzip":
+                    return gzip.decompress(data)
+                return data
+        except Exception as exc:  # noqa: BLE001 - network retry boundary
+            last = exc
+            if n == attempts - 1:
+                raise
+            time.sleep(0.8 * (n + 1))
+    raise RuntimeError(last)
+
+
+def cache_json(name: str, url: str, hours: float, headers: dict[str, str], timeout: int = 30, attempts: int = 3) -> Any:
+    path = CACHE / name
+    if path.exists() and datetime.now(timezone.utc) - datetime.fromtimestamp(path.stat().st_mtime, timezone.utc) < timedelta(hours=hours):
+        return json.loads(path.read_text())
+    payload = json.loads(get(url, headers, timeout=timeout, attempts=attempts).decode("utf-8", "replace"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return payload
+
+
+def sp500() -> list[Company]:
+    path = CACHE / "sp500.html"
+    if path.exists() and datetime.now(timezone.utc) - datetime.fromtimestamp(path.stat().st_mtime, timezone.utc) < timedelta(hours=12):
+        html = path.read_text(encoding="utf-8")
+    else:
+        html = get(WIKI_URL, {"User-Agent": "Mozilla/5.0"}).decode("utf-8", "replace")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(html, encoding="utf-8")
+    p = TableParser()
+    p.feed(html)
+    headers = {v: i for i, v in enumerate(p.rows[0])}
+    out: list[Company] = []
+    for row in p.rows[1:]:
+        if len(row) < len(headers):
+            continue
+        cik = row[headers["CIK"]] if "CIK" in headers else None
+        out.append(
+            Company(
+                ticker=row[headers["Symbol"]].replace(".", "-").upper(),
+                name=row[headers["Security"]],
+                sector=row[headers["GICS Sector"]],
+                industry=row[headers["GICS Sub-Industry"]],
+                cik=str(cik).zfill(10) if cik else None,
+            )
+        )
+    return out
+
+
+FLOW = {
+    "revenue": ["RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet"],
+    "gross_profit": ["GrossProfit"],
+    "operating_income": ["OperatingIncomeLoss"],
+    "net_income": ["NetIncomeLoss", "ProfitLoss"],
+    "cfo": ["NetCashProvidedByUsedInOperatingActivities", "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"],
+    "capex": ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"],
+    "da": ["DepreciationDepletionAndAmortization", "DepreciationAndAmortization", "Depreciation"],
+    "rd": ["ResearchAndDevelopmentExpense"],
+}
+INST = {
+    "assets": ["Assets"],
+    "liabilities": ["Liabilities"],
+    "equity": ["StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"],
+    "cash": ["CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"],
+    "debt": ["LongTermDebtAndFinanceLeaseObligationsCurrent", "LongTermDebtCurrent", "ShortTermBorrowings"],
+    "long_debt": ["LongTermDebtAndFinanceLeaseObligationsNoncurrent", "LongTermDebtNoncurrent"],
+}
+
+
+def candidates(facts: dict[str, Any], tags: list[str], unit: str = "USD") -> list[dict[str, Any]]:
+    ans = []
+    preferred = ["shares"] if unit == "shares" else ["USD", "USD/shares", "pure"]
+    for tag in tags:
+        metric = facts.get(tag, {})
+        units = metric.get("units", {})
+        keys = [x for x in preferred if x in units] + [x for x in units if x not in preferred]
+        for key in keys:
+            for item in units.get(key, []):
+                if item.get("val") is not None and item.get("form") in {None, "10-K", "10-Q", "20-F", "40-F"}:
+                    ans.append({**item, "_tag": tag, "_unit": key})
+    return ans
+
+
+def val(item: dict[str, Any] | None) -> float | None:
+    try:
+        return None if item is None else float(item["val"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def fact_audit(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not item:
+        return None
+    return {
+        "tag": item.get("_tag"),
+        "unit": item.get("_unit"),
+        "value": val(item),
+        "form": item.get("form"),
+        "fy": item.get("fy"),
+        "fp": item.get("fp"),
+        "start": item.get("start"),
+        "end": item.get("end"),
+        "filed": item.get("filed"),
+        "accn": item.get("accn"),
+    }
+
+
+def annual(item: dict[str, Any]) -> bool:
+    if item.get("fp") == "FY":
+        return True
+    try:
+        return (date.fromisoformat(item["end"]) - date.fromisoformat(item["start"])).days >= 300
+    except Exception:
+        return False
+
+
+def latest(items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return max(items, key=lambda x: (str(x.get("filed", "")), str(x.get("end", "")), str(x.get("accn", "")))) if items else None
+
+
+def annual_fact(facts: dict[str, Any], tags: list[str], unit: str = "USD") -> dict[str, Any] | None:
+    return latest([x for x in candidates(facts, tags, unit) if annual(x)])
+
+
+def instant_fact(facts: dict[str, Any], tags: list[str], unit: str = "USD") -> dict[str, Any] | None:
+    return latest([x for x in candidates(facts, tags, unit) if x.get("end") and not x.get("start")] or [x for x in candidates(facts, tags, unit) if x.get("end")])
+
+
+def cagr(history: list[dict[str, Any]], periods: int = 3) -> float | None:
+    clean_hist = [x for x in history if x.get("value") and x["value"] > 0]
+    if len(clean_hist) < 2:
+        return None
+    clean_hist = clean_hist[-(periods + 1) :]
+    years = max(1, clean_hist[-1]["fy"] - clean_hist[0]["fy"])
+    return (clean_hist[-1]["value"] / clean_hist[0]["value"]) ** (1 / years) - 1
+
+
+def facts(cik: str) -> dict[str, Any]:
+    return cache_json(
+        f"companyfacts_{cik}.json",
+        FACTS_URL.format(cik=cik),
+        12,
+        {"User-Agent": SEC_UA, "Accept": "application/json", "Accept-Encoding": "gzip"},
+    )
+
+
+def fundamentals_snapshot() -> dict[str, Any]:
+    global _FUNDAMENTALS_SNAPSHOT_CACHE
+    if _FUNDAMENTALS_SNAPSHOT_CACHE is None:
+        if FUNDAMENTALS_SNAPSHOT.exists():
+            _FUNDAMENTALS_SNAPSHOT_CACHE = json.loads(FUNDAMENTALS_SNAPSHOT.read_text(encoding="utf-8"))
+        elif FUNDAMENTALS_SNAPSHOT_GZ.exists():
+            _FUNDAMENTALS_SNAPSHOT_CACHE = json.loads(gzip.decompress(FUNDAMENTALS_SNAPSHOT_GZ.read_bytes()).decode("utf-8"))
+        elif FUNDAMENTALS_SNAPSHOT_B64.exists():
+            raw = base64.b64decode(FUNDAMENTALS_SNAPSHOT_B64.read_text(encoding="utf-8"))
+            _FUNDAMENTALS_SNAPSHOT_CACHE = json.loads(gzip.decompress(raw).decode("utf-8"))
+        elif EMBEDDED_FUNDAMENTALS_SNAPSHOT_B64:
+            raw = base64.b64decode(EMBEDDED_FUNDAMENTALS_SNAPSHOT_B64)
+            _FUNDAMENTALS_SNAPSHOT_CACHE = json.loads(gzip.decompress(raw).decode("utf-8"))
+        else:
+            _FUNDAMENTALS_SNAPSHOT_CACHE = {"fundamentals": {}}
+    return _FUNDAMENTALS_SNAPSHOT_CACHE
+
+
+def snapshot_fundamentals(cik: str) -> dict[str, Any] | None:
+    record = fundamentals_snapshot().get("fundamentals", {}).get(cik)
+    return dict(record) if isinstance(record, dict) else None
+
+
+def fundamentals(raw: dict[str, Any]) -> dict[str, Any]:
+    us = raw.get("facts", {}).get("us-gaap", {})
+    dei = raw.get("facts", {}).get("dei", {})
+    flow_items = {k: annual_fact(us, tags) for k, tags in FLOW.items()}
+    instant_items = {k: instant_fact(us, tags) for k, tags in INST.items()}
+    shares_outstanding_item = instant_fact(dei, ["EntityCommonStockSharesOutstanding"], "shares")
+    diluted_shares_item = annual_fact(us, ["WeightedAverageNumberOfDilutedSharesOutstanding"], "shares")
+    f = {k: val(item) for k, item in flow_items.items()}
+    i = {k: val(item) for k, item in instant_items.items()}
+    debt = sum(x for x in [i.get("debt"), i.get("long_debt")] if x is not None) or None
+    revenue_history = []
+    by_year: dict[int, dict[str, Any]] = {}
+    for item in [x for x in candidates(us, FLOW["revenue"]) if annual(x)]:
+        if item.get("fy") is not None:
+            y = int(item["fy"])
+            if y not in by_year or latest([item, by_year[y]]) is item:
+                by_year[y] = item
+    for y in sorted(by_year):
+        revenue_history.append({"fy": y, "value": val(by_year[y]), "source": fact_audit(by_year[y])})
+    cfo, capex, ni, da = f.get("cfo"), f.get("capex"), f.get("net_income"), f.get("da")
+    if cfo is not None and capex is not None:
+        owner_earnings = cfo - abs(capex)
+        owner_formula = "cfo - abs(capex)"
+    elif ni is not None and da is not None:
+        owner_earnings = ni + da
+        owner_formula = "net_income + depreciation_amortization"
+    else:
+        owner_earnings = None
+        owner_formula = "unavailable"
+    return {
+        **f,
+        **i,
+        "debt": debt,
+        "revenue_history": revenue_history,
+        "revenue_cagr_3y": cagr(revenue_history),
+        "shares_outstanding": val(shares_outstanding_item),
+        "diluted_shares": val(diluted_shares_item),
+        "owner_earnings": owner_earnings,
+        "data_audit": {
+            "source": "SEC EDGAR companyfacts",
+            "taxonomy": {"financials": "us-gaap", "shares_outstanding": "dei"},
+            "selected_facts": {
+                **{k: fact_audit(item) for k, item in flow_items.items()},
+                **{k: fact_audit(item) for k, item in instant_items.items()},
+                "shares_outstanding": fact_audit(shares_outstanding_item),
+                "diluted_shares": fact_audit(diluted_shares_item),
+            },
+            "owner_earnings_formula": owner_formula,
+            "owner_earnings_inputs": {
+                "cfo": cfo,
+                "capex": capex,
+                "net_income": ni,
+                "depreciation_amortization": da,
+            },
+            "revenue_history": revenue_history[-5:],
+        },
+    }
+
+
+def price(ticker: str) -> dict[str, Any]:
+    try:
+        p = cache_json(f"price_{ticker}.json", YAHOO_URL.format(ticker=quote(ticker)), 0.25, {"User-Agent": "Mozilla/5.0"}, timeout=6, attempts=2)
+        result = (p.get("chart", {}).get("result") or [{}])[0]
+        meta = result.get("meta", {})
+        px = meta.get("regularMarketPrice")
+        ts = meta.get("regularMarketTime")
+        if px is None:
+            closes = ((result.get("indicators", {}).get("quote") or [{}])[0].get("close") or [])
+            px = next((x for x in reversed(closes) if x is not None), None)
+        if px is None:
+            raise RuntimeError("missing_yahoo_price")
+        return {
+            "price": float(px),
+            "currency": meta.get("currency") or "USD",
+            "market_time": datetime.fromtimestamp(ts, timezone.utc).isoformat() if ts else None,
+            "price_source": "Yahoo chart endpoint",
+        }
+    except Exception as yahoo_exc:  # noqa: BLE001 - fall through to backup quote source
+        symbol = ticker.replace("-", ".").lower()
+        raw = get(STOOQ_URL.format(ticker=quote(symbol)), {"User-Agent": "Mozilla/5.0", "Accept": "text/csv"}, timeout=20).decode("utf-8", "replace")
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        if len(lines) < 2:
+            raise RuntimeError(f"missing_price;yahoo={yahoo_exc}") from yahoo_exc
+        fields = [x.strip() for x in lines[1].split(",")]
+        if len(fields) < 7 or fields[6].upper() == "N/D":
+            raise RuntimeError(f"missing_stooq_price;yahoo={yahoo_exc}") from yahoo_exc
+        market_time = None
+        if fields[1] != "N/D" and fields[2] != "N/D":
+            try:
+                market_time = datetime.fromisoformat(f"{fields[1]}T{fields[2]}+00:00").isoformat()
+            except ValueError:
+                market_time = None
+        return {
+            "price": float(fields[6]),
+            "currency": "USD",
+            "market_time": market_time,
+            "price_source": "Stooq daily quote fallback",
+        }
+
+
+def shiller_pe() -> dict[str, Any]:
+    html = get(SHILLER_PE_URL, {"User-Agent": "Mozilla/5.0"}, timeout=20).decode("utf-8", "replace")
+    current = re.search(r'id="current".*?<b>Current.*?</b>\s*([0-9]+(?:\.[0-9]+)?)', html, re.S)
+    timestamp = re.search(r'<div id="timestamp">\s*([^<]+?)\s*</div>', html, re.S)
+    if not current:
+        raise RuntimeError("missing_shiller_pe")
+    return {
+        "name": "S&P 500 Shiller PE",
+        "value": round(float(current.group(1)), 2),
+        "as_of": clean(timestamp.group(1)) if timestamp else None,
+        "source": SHILLER_PE_URL,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def cnn_fear_greed() -> dict[str, Any]:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Referer": "https://edition.cnn.com/",
+        "Accept": "application/json",
+    }
+    data = json.loads(get(CNN_FEAR_GREED_URL, headers, timeout=20).decode("utf-8", "replace"))
+    fg = data.get("fear_and_greed") or {}
+    if fg.get("score") is None:
+        raise RuntimeError("missing_cnn_fear_greed_score")
+    return {
+        "name": "CNN Fear & Greed Index",
+        "value": round(float(fg["score"]), 1),
+        "rating": fg.get("rating"),
+        "as_of": fg.get("timestamp"),
+        "source": "https://edition.cnn.com/markets/fear-and-greed",
+        "api_source": CNN_FEAR_GREED_URL,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def market_context() -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    errors: list[dict[str, str]] = []
+    for key, fn in [("shiller_pe", shiller_pe), ("cnn_fear_greed", cnn_fear_greed)]:
+        try:
+            out[key] = fn()
+        except Exception as exc:  # noqa: BLE001 - show unavailable instead of inventing a macro value
+            out[key] = None
+            errors.append({"source": key, "error": f"{type(exc).__name__}:{exc}"})
+    out["errors"] = errors
+    return out
+
+
+def clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
+
+
+def div(a: float | None, b: float | None) -> float | None:
+    return None if a is None or b in {None, 0} else a / b
+
+
+def rscore(v: float | None, lo: float, hi: float) -> float | None:
+    return None if v is None or hi == lo else clamp((v - lo) / (hi - lo), 0, 1) * 100
+
+
+def inv(v: float | None, good: float, bad: float) -> float | None:
+    return None if v is None or bad == good else clamp((bad - v) / (bad - good), 0, 1) * 100
+
+
+def avg(*xs: float | None) -> float | None:
+    ys = [x for x in xs if x is not None]
+    return sum(ys) / len(ys) if ys else None
+
+
+def weighted(*xs: tuple[float | None, float]) -> float | None:
+    ys = [(x, w) for x, w in xs if x is not None]
+    return sum(x * w for x, w in ys) / sum(w for _, w in ys) if ys else None
+
+
+def shares(diluted: float | None, outstanding: float | None) -> tuple[float | None, str | None]:
+    if diluted is not None and diluted >= 1_000_000:
+        return diluted, None
+    if outstanding is not None and outstanding >= 1_000_000:
+        return outstanding, "using_current_shares_outstanding_fallback"
+    if diluted is not None or outstanding is not None:
+        return None, "invalid_or_implausible_share_count"
+    return None, "missing_share_count"
+
+
+def dcf(owner_earnings: float, cash: float, debt: float, growth: float, discount: float, terminal: float) -> float | None:
+    if owner_earnings <= 0 or discount <= terminal:
+        return None
+    cf = owner_earnings
+    pv = 0.0
+    for year in range(1, 11):
+        g = growth + (terminal - growth) * ((year - 1) / 9)
+        cf *= 1 + g
+        pv += cf / ((1 + discount) ** year)
+    tv = cf * (1 + terminal) / (discount - terminal)
+    return max(0.0, pv + tv / ((1 + discount) ** 10) + cash - debt)
+
+
+def rnd(x: float | None, n: int = 4) -> float | None:
+    return None if x is None or not math.isfinite(x) else round(x, n)
+
+
+def unavailable_audit(company: Company, err: str | None) -> dict[str, Any]:
+    return {
+        "ticker": company.ticker,
+        "cik": company.cik,
+        "data_sources": {
+            "financials": "SEC EDGAR companyfacts",
+            "snapshot_generated_at": fundamentals_snapshot().get("generated_at"),
+        },
+        "source_quality": {
+            "status": "not_auditable_in_current_run",
+            "reason": err or "missing fundamentals or price",
+        },
+        "missing_inputs": ["price", "shares", "owner_earnings", "revenue_cagr_3y"],
+        "valuation": {"method": "55% Base + 20% Bull + 25% Black Swan owner-earnings DCF"},
+    }
+
+
+def audit_payload(
+    company: Company,
+    f: dict[str, Any] | None,
+    q: dict[str, Any] | None,
+    sh: float | None,
+    px: float | None,
+    market_cap: float | None,
+    fair: float | None,
+    gap: float | None,
+    scenarios: dict[str, Any],
+    scores: dict[str, float | None],
+    status: str,
+    notes: list[str],
+    risks: list[str],
+    supported: bool,
+) -> dict[str, Any]:
+    data_audit = (f or {}).get("data_audit") or {}
+    selected_facts = {k: v for k, v in (data_audit.get("selected_facts") or {}).items() if v}
+    inputs = {
+        "price": px,
+        "shares": sh,
+        "market_cap": market_cap,
+        "revenue": (f or {}).get("revenue"),
+        "owner_earnings": (f or {}).get("owner_earnings"),
+        "cash": (f or {}).get("cash"),
+        "debt": (f or {}).get("debt"),
+        "revenue_cagr_3y": (f or {}).get("revenue_cagr_3y"),
+        "net_income": (f or {}).get("net_income"),
+        "operating_income": (f or {}).get("operating_income"),
+        "gross_profit": (f or {}).get("gross_profit"),
+        "assets": (f or {}).get("assets"),
+        "liabilities": (f or {}).get("liabilities"),
+        "equity": (f or {}).get("equity"),
+    }
+    missing = [k for k, v in inputs.items() if v is None]
+    owner_inputs = data_audit.get("owner_earnings_inputs") or {
+        "cfo": (f or {}).get("cfo"),
+        "capex": (f or {}).get("capex"),
+        "net_income": (f or {}).get("net_income"),
+        "depreciation_amortization": (f or {}).get("da"),
+    }
+    source_quality = {
+        "status": "tag_level_audit_available" if selected_facts else "legacy_snapshot_without_tag_level_audit",
+        "note": None if selected_facts else "当前 SEC 快照早于逐字段审计功能；下次 SEC bulk 快照刷新后会显示每个字段对应的 tag、filed date 和 accn。",
+    }
+    return {
+        "ticker": company.ticker,
+        "cik": company.cik,
+        "issuer_key": company.cik or company.name.lower(),
+        "data_sources": {
+            "financials": data_audit.get("source") or "SEC EDGAR companyfacts snapshot",
+            "snapshot_generated_at": fundamentals_snapshot().get("generated_at"),
+            "price": q.get("price_source") if q else None,
+            "market_time": q.get("market_time") if q else None,
+        },
+        "source_quality": source_quality,
+        "sec_facts": selected_facts,
+        "owner_earnings": {
+            "formula": data_audit.get("owner_earnings_formula") or ("cfo - abs(capex)" if owner_inputs.get("cfo") is not None and owner_inputs.get("capex") is not None else "net_income + depreciation_amortization fallback if cfo/capex unavailable"),
+            "inputs": {k: rnd(v) for k, v in owner_inputs.items()},
+            "value": rnd((f or {}).get("owner_earnings")),
+        },
+        "valuation": {
+            "method": "55% Base + 20% Bull + 25% Black Swan owner-earnings DCF",
+            "inputs": {k: rnd(v, 6 if k == "revenue_cagr_3y" else 4) for k, v in inputs.items()},
+            "scenarios": scenarios,
+            "weighted_fair_value": rnd(fair),
+            "fair_value_gap": rnd(gap, 6),
+        },
+        "score_breakdown": {
+            "value_formula": "35% discount + 35% Buffett + 20% moat + 10% data completeness",
+            "growth_formula": "25% discount + 40% Lynch + 30% Fisher + 5% data completeness",
+            "components": {k: rnd(v) for k, v in scores.items()},
+        },
+        "quality_checks": {
+            "status": status,
+            "sector_model_supported": supported,
+            "missing_inputs": missing,
+            "source_notes": notes,
+            "risk_tags": sorted(set(risks)),
+        },
+    }
+
+
+def score(company: Company, f: dict[str, Any] | None, q: dict[str, Any] | None, err: str | None) -> dict[str, Any]:
+    if err in {"fundamentals_snapshot_not_in_mvp_candidate_set", "fundamentals_error:RuntimeError:prefer_fundamentals_snapshot"}:
+        return {
+            "ticker": company.ticker,
+            "name": company.name,
+            "cik": company.cik,
+            "issuer_key": company.cik or company.name.lower(),
+            "sector": company.sector,
+            "industry": company.industry,
+            "price": None,
+            "currency": None,
+            "market_time": None,
+            "price_source": None,
+            "fair_value": None,
+            "fair_value_method": "55% Base + 20% Bull + 25% Black Swan owner-earnings DCF",
+            "fair_value_gap": None,
+            "value_rank_score": None,
+            "growth_rank_score": None,
+            "buffett_score": None,
+            "moat_score": None,
+            "lynch_score": None,
+            "fisher_score": None,
+            "discount_score": None,
+            "data_score": 0,
+            "revenue_cagr_3y": None,
+            "owner_earnings_yield": None,
+            "fcf_margin": None,
+            "operating_margin": None,
+            "gross_margin": None,
+            "roe": None,
+            "debt_to_assets": None,
+            "scenarios": {},
+            "audit": unavailable_audit(company, err),
+            "source_notes": ["not_in_current_mvp_candidate_set"],
+            "risk_tags": ["mvp_candidate_filter"],
+            "status": "not_in_mvp_candidate_set",
+        }
+    notes = [err] if err else []
+    risks = []
+    sh, share_note = shares(f.get("diluted_shares") if f else None, f.get("shares_outstanding") if f else None)
+    if share_note:
+        notes.append(share_note)
+    px = q.get("price") if q else None
+    supported = company.sector not in EXCLUDED_SECTORS
+    revenue, oe, ni = (f or {}).get("revenue"), (f or {}).get("owner_earnings"), (f or {}).get("net_income")
+    op, gp, assets, liabilities, equity = (f or {}).get("operating_income"), (f or {}).get("gross_profit"), (f or {}).get("assets"), (f or {}).get("liabilities"), (f or {}).get("equity")
+    cash, debt, rd = (f or {}).get("cash") or 0.0, (f or {}).get("debt") or 0.0, (f or {}).get("rd")
+    rev_cagr = (f or {}).get("revenue_cagr_3y")
+    fair, gap, scenarios = None, None, {}
+    if supported and px and sh and oe and oe > 0:
+        g = clamp(rev_cagr if rev_cagr is not None else 0.03, -0.05, 0.15)
+        setup = {"base": (g, 0.09, 0.025, 0.55), "bull": (clamp(g + 0.03, -0.02, 0.18), 0.08, 0.03, 0.20), "black_swan": (clamp(g - 0.07, -0.10, 0.08), 0.11, 0.0, 0.25)}
+        fair = 0.0
+        for name, (growth, discount, terminal, weight) in setup.items():
+            ev = dcf(oe, cash, debt, growth, discount, terminal)
+            per_share = ev / sh if ev and sh else None
+            scenarios[name] = {"growth": growth, "discount_rate": discount, "terminal_growth": terminal, "weight": weight, "per_share": per_share}
+            if per_share is not None:
+                fair += per_share * weight
+        fair = fair or None
+        gap = fair / px - 1 if fair and px else None
+    else:
+        risks.append("insufficient_valuation_data")
+        if not supported:
+            notes.append("generic_owner_earnings_dcf_not_supported_for_sector")
+            risks.append("sector_model_limit")
+    market_cap = px * sh if px and sh else None
+    fcf_margin, op_margin, gross_margin = div(oe, revenue), div(op, revenue), div(gp, revenue)
+    roe, debt_assets = div(ni, equity), div(liabilities, assets)
+    oe_yield, rd_sales = div(oe, market_cap), div(rd, revenue)
+    discount_score = rscore(gap, -0.20, 0.80)
+    data_items = [px, sh, revenue, oe, ni, op, assets, liabilities, equity, cash, debt, rev_cagr]
+    data_score = 100 * sum(x is not None for x in data_items) / len(data_items)
+    buffett = avg(rscore(oe_yield, 0.02, 0.10), rscore(fcf_margin, 0.03, 0.18), rscore(roe, 0.08, 0.25), inv(debt_assets, 0.30, 0.80), rscore(op_margin, 0.08, 0.28))
+    moat = avg(rscore(gross_margin, 0.25, 0.65), rscore(op_margin, 0.10, 0.32), rscore(roe, 0.10, 0.30), rscore(fcf_margin, 0.05, 0.20), inv(abs(rev_cagr) if rev_cagr is not None else None, 0, 0.30))
+    peg = None if not market_cap or not ni or ni <= 0 or not rev_cagr or rev_cagr <= 0 else market_cap / ni / (rev_cagr * 100)
+    peg_score = None if peg is None or peg <= 0 else (100.0 if peg <= 1 else (0.0 if peg >= 3 else (3 - peg) / 2 * 100))
+    lynch = avg(rscore(rev_cagr, 0.02, 0.18), peg_score, rscore(fcf_margin, 0.02, 0.15), rscore(op_margin, 0.05, 0.25))
+    fisher = avg(rscore(rev_cagr, 0.04, 0.20), rscore(gross_margin, 0.30, 0.70), rscore(op_margin, 0.08, 0.30), rscore(rd_sales, 0.03, 0.18), rscore(fcf_margin, 0.03, 0.18))
+    growth_style = supported and (rev_cagr or 0) >= 0.06 and (lynch or 0) >= 45 and (fisher or 0) >= 45 and (fcf_margin or -1) > 0 and (op_margin or -1) > 0 and data_score >= 75
+    value_score = weighted((discount_score, 0.35), (buffett, 0.35), (moat, 0.20), (data_score, 0.10)) if supported and not growth_style and gap is not None and gap >= 0 and (buffett or 0) >= 45 and (moat or 0) >= 40 and (oe_yield or 0) >= 0.035 and data_score >= 75 else None
+    growth_score = weighted((discount_score, 0.25), (lynch, 0.40), (fisher, 0.30), (data_score, 0.05)) if growth_style and gap is not None and gap >= -0.15 and discount_score is not None else None
+    if gap is not None and gap < 0:
+        risks.append("priced_above_weighted_fair_value")
+    if value_score is not None or growth_score is not None:
+        status = "rankable"
+    elif not supported:
+        status = "sector_model_limit"
+    elif fair is not None and gap is not None and data_score >= 75:
+        status = "fails_current_screen"
+    else:
+        status = "insufficient_financial_data"
+    scores = {
+        "discount_score": discount_score,
+        "buffett_score": buffett,
+        "moat_score": moat,
+        "lynch_score": lynch,
+        "fisher_score": fisher,
+        "data_score": data_score,
+        "value_rank_score": value_score,
+        "growth_rank_score": growth_score,
+        "owner_earnings_yield": oe_yield,
+        "fcf_margin": fcf_margin,
+        "operating_margin": op_margin,
+        "gross_margin": gross_margin,
+        "roe": roe,
+        "debt_to_assets": debt_assets,
+    }
+    return {
+        "ticker": company.ticker,
+        "name": company.name,
+        "cik": company.cik,
+        "issuer_key": company.cik or company.name.lower(),
+        "sector": company.sector,
+        "industry": company.industry,
+        "price": rnd(px),
+        "currency": q.get("currency") if q else None,
+        "market_time": q.get("market_time") if q else None,
+        "price_source": q.get("price_source") if q else None,
+        "fair_value": rnd(fair),
+        "fair_value_method": "55% Base + 20% Bull + 25% Black Swan owner-earnings DCF",
+        "fair_value_gap": rnd(gap, 6),
+        "value_rank_score": rnd(value_score),
+        "growth_rank_score": rnd(growth_score),
+        "buffett_score": rnd(buffett),
+        "moat_score": rnd(moat),
+        "lynch_score": rnd(lynch),
+        "fisher_score": rnd(fisher),
+        "discount_score": rnd(discount_score),
+        "data_score": round(data_score, 4),
+        "revenue_cagr_3y": rnd(rev_cagr, 6),
+        "owner_earnings_yield": rnd(oe_yield, 6),
+        "fcf_margin": rnd(fcf_margin, 6),
+        "operating_margin": rnd(op_margin, 6),
+        "gross_margin": rnd(gross_margin, 6),
+        "roe": rnd(roe, 6),
+        "debt_to_assets": rnd(debt_assets, 6),
+        "scenarios": scenarios,
+        "audit": audit_payload(company, f, q, sh, px, market_cap, fair, gap, scenarios, scores, status, notes, risks, supported),
+        "source_notes": notes,
+        "risk_tags": sorted(set(risks)),
+        "status": status,
+    }
+
+
+def dedupe(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen, out = set(), []
+    for row in rows:
+        key = row.get("issuer_key") or row["ticker"]
+        if key not in seen:
+            seen.add(key)
+            out.append(row)
+    return out
+
+
+def run(limit: int, pause: float) -> dict[str, Any]:
+    started = datetime.now(timezone.utc)
+    rows, errors = [], []
+    universe = sp500()
+    if limit:
+        universe = universe[:limit]
+    for n, c in enumerate(universe, 1):
+        print(f"[{n}/{len(universe)}] {c.ticker} {c.name}", flush=True)
+        f, q, err = None, None, None
+        try:
+            if not c.cik:
+                raise RuntimeError("missing_cik")
+            if PREFER_FUNDAMENTALS_SNAPSHOT:
+                f = snapshot_fundamentals(c.cik)
+                if f:
+                    err = "fundamentals_snapshot_preferred"
+                else:
+                    raise RuntimeError("missing_fundamentals_snapshot")
+            else:
+                f = fundamentals(facts(c.cik))
+                time.sleep(pause)
+        except Exception as exc:  # noqa: BLE001
+            fallback = None if PREFER_FUNDAMENTALS_SNAPSHOT else (snapshot_fundamentals(c.cik) if c.cik else None)
+            if fallback:
+                f = fallback
+                if str(exc) == "prefer_fundamentals_snapshot":
+                    err = "fundamentals_snapshot_preferred"
+                else:
+                    err = f"fundamentals_snapshot_fallback:live_sec_{type(exc).__name__}:{exc}"
+                    errors.append({"ticker": c.ticker, "stage": "fundamentals_live", "error": str(exc), "fallback": "fundamentals_snapshot"})
+            elif PREFER_FUNDAMENTALS_SNAPSHOT and str(exc) == "missing_fundamentals_snapshot":
+                err = "fundamentals_snapshot_not_in_mvp_candidate_set"
+            elif str(exc) == "prefer_fundamentals_snapshot":
+                err = "fundamentals_snapshot_not_in_mvp_candidate_set"
+            else:
+                err = f"fundamentals_error:{type(exc).__name__}:{exc}"
+                errors.append({"ticker": c.ticker, "stage": "fundamentals", "error": str(exc)})
+        if not (PREFER_FUNDAMENTALS_SNAPSHOT and f is None):
+            try:
+                q = price(c.ticker)
+                time.sleep(max(0.03, pause / 2))
+            except Exception as exc:  # noqa: BLE001
+                perr = f"price_error:{type(exc).__name__}:{exc}"
+                err = f"{err};{perr}" if err else perr
+                errors.append({"ticker": c.ticker, "stage": "price", "error": str(exc)})
+        rows.append(score(c, f, q, err))
+    values = dedupe(sorted([r for r in rows if r["value_rank_score"] is not None], key=lambda x: x["value_rank_score"], reverse=True))
+    growth = dedupe(sorted([r for r in rows if r["growth_rank_score"] is not None], key=lambda x: x["growth_rank_score"], reverse=True))
+    context = market_context()
+    payload = {
+        "metadata": {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": started.isoformat(),
+            "universe": "S&P 500",
+            "processed_companies": len(rows),
+            "rankable_companies": sum(r["status"] == "rankable" for r in rows),
+            "value_rankable_companies": len(values),
+            "growth_rankable_companies": len(growth),
+            "source_notes": [
+                "Financial statements: SEC EDGAR companyfacts.",
+                "If live SEC companyfacts is unavailable, the cloud build uses a committed SEC-derived fundamentals snapshot and marks each fallback row in source_notes.",
+                "S&P 500 constituents: Wikipedia table for this MVP; replace with licensed index data in production.",
+                "Market prices: Yahoo chart endpoint with Stooq daily quote fallback for this MVP; replace with licensed market data in production.",
+                "Market context: S&P 500 Shiller PE from Multpl; CNN Fear & Greed from CNN's public dataviz JSON endpoint.",
+                "Valuation: Python owner-earnings DCF using Base/Bull/Black Swan weighted fair value.",
+                "Audit: each company row includes price source, snapshot source, owner-earnings inputs, DCF scenarios, score components, missing inputs, and SEC tag-level provenance when the snapshot was built with the audit-enabled parser.",
+                "Per-share valuation uses diluted weighted-average shares first; implausible SEC share tags are ignored.",
+                "Top lists are de-duplicated by issuer CIK so multiple share classes do not occupy multiple ranks.",
+                "Financials, Real Estate, and Utilities are flagged out until sector-specific valuation modules are added.",
+            ],
+            "ranking_weights": {"value": {"discount_score": 0.35, "buffett_score": 0.35, "moat_score": 0.20, "data_score": 0.10}, "growth": {"discount_score": 0.25, "lynch_score": 0.40, "fisher_score": 0.30, "data_score": 0.05}},
+            "score_definitions": {
+                "weighted_fair_value": "55% Base + 20% Bull + 25% Black Swan owner-earnings DCF per share.",
+                "discount_score": "Fair-value gap mapped from -20% to +80% into a 0-100 score.",
+                "value_rank_score": "35% discount_score + 35% Buffett quality + 20% moat + 10% data completeness.",
+                "growth_rank_score": "25% discount_score + 40% Peter Lynch growth/value fit + 30% Fisher growth quality + 5% data completeness.",
+            },
+            "market_context": context,
+            "fundamentals_snapshot_generated_at": fundamentals_snapshot().get("generated_at"),
+            "fallback_fundamentals_companies": sum(any("fundamentals_snapshot_fallback" in note for note in r["source_notes"]) for r in rows),
+            "errors": errors,
+        },
+        "value_top_10": values[:10],
+        "growth_top_10": growth[:10],
+        "companies": rows,
+    }
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    OUT.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return payload
+
+
+INDEX = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>S&P 500 价值/成长监控</title><link rel="stylesheet" href="assets/styles.css"></head><body><main><header><div><p class="eyebrow">S&P 500 Monitor</p><h1>价值股与成长股每日监控</h1></div><div class="stamp" id="stamp">Loading...</div></header><section class="macro" id="macro"></section><section class="explain"><div><h2>评分口径</h2><p>加权公允价值 = 55% 基准情景 + 20% 乐观情景 + 25% 黑天鹅情景，均由 Python 所有者收益 DCF 逐股计算。</p></div><div class="formula"><b>价值分</b><span>35% 折价 + 35% 巴菲特质量 + 20% 护城河 + 10% 数据完整度</span></div><div class="formula"><b>成长分</b><span>25% 折价 + 40% 彼得林奇 + 30% 费雪 + 5% 数据完整度</span></div></section><section class="grid"><article><h2>价值股前十</h2><div id="value"></div></article><article><h2>成长股前十</h2><div id="growth"></div></article></section><section><div class="toolbar"><h2>全量样本</h2><input id="q" placeholder="搜索代码、公司、行业或状态"></div><div id="all"></div></section></main><script src="assets/app.js"></script></body></html>"""
+CSS = """:root{color-scheme:light;--ink:#172026;--muted:#65727c;--line:#d9e0e5;--paper:#f8fafb;--panel:#fff;--green:#21725d;--blue:#255f85;--red:#a33;--amber:#9a6a18}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}main{max-width:1240px;margin:auto;padding:28px 18px 48px}header{display:flex;justify-content:space-between;gap:18px;align-items:end;margin-bottom:16px}h1{margin:.1rem 0 0;font-size:clamp(30px,5vw,52px);line-height:1.02;letter-spacing:0}h2{margin:0 0 14px;font-size:20px}.eyebrow{margin:0;color:var(--green);font-weight:700;letter-spacing:0;text-transform:uppercase}.stamp{color:var(--muted);text-align:right}.macro{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:16px;background:transparent;border:0;box-shadow:none;padding:0}.tile,section,article{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px;box-shadow:0 10px 30px #1720260a}.tile{min-height:108px}.tile .label{color:var(--muted);font-size:13px}.tile .big{font-size:30px;font-weight:800;line-height:1.1;margin-top:8px}.tile .sub{color:var(--muted);margin-top:6px}.explain{display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:14px;margin-bottom:16px}.explain p{margin:0;color:var(--muted)}.formula{border-left:3px solid #d9e0e5;padding-left:12px}.formula b{display:block;margin-bottom:4px}.formula span{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:16px;background:transparent;border:0;box-shadow:none;padding:0}.row{display:grid;grid-template-columns:44px 1fr auto;gap:12px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}.row:first-child{border-top:0}.rank{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:#e7f1ed;color:var(--green);font-weight:800}.ticker{font-weight:800}.name{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:330px}.score{text-align:right}.score b{font-size:18px}.metrics{grid-column:2/4;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:2px}.metric{background:#f4f7f8;border:1px solid var(--line);border-radius:8px;padding:8px}.metric span{display:block;color:var(--muted);font-size:12px}.metric b{font-size:14px}.components{grid-column:2/4;color:var(--muted);font-size:12px}.gap.pos{color:var(--green)}.gap.neg{color:var(--red)}.toolbar{display:flex;justify-content:space-between;gap:14px;align-items:center}input{width:min(420px,100%);padding:11px 12px;border:1px solid var(--line);border-radius:8px;font:inherit}.table{overflow:auto}table{width:100%;border-collapse:collapse;min-width:1160px}th,td{text-align:left;padding:10px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-size:12px;text-transform:uppercase}td.num{text-align:right;font-variant-numeric:tabular-nums}.badge{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:3px 8px;font-size:12px;white-space:nowrap}.badge.ok{color:var(--green);background:#e7f1ed}.badge.warn{color:var(--amber);background:#fff5df}.badge.muted{color:var(--muted);background:#f4f7f8}.audit{grid-column:2/4;margin-top:8px}.audit summary{cursor:pointer;color:var(--blue);font-weight:700;list-style:none}.audit summary::-webkit-details-marker{display:none}.auditPanel{margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:8px;background:#fbfcfd;color:var(--ink);min-width:min(980px,82vw)}.auditPanel h3{margin:0 0 6px;font-size:13px;color:var(--ink)}.auditPanel p{margin:0 0 10px}.auditGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:12px}.auditFacts{min-width:860px;margin-bottom:12px;background:#fff}.auditFacts th,.auditFacts td{font-size:12px;padding:7px}.muted,.sub{color:var(--muted)}.auditPanel ul{margin:0 0 8px;padding-left:18px}@media(max-width:900px){header,.toolbar{display:block}.stamp{text-align:left;margin-top:10px}.macro,.explain,.grid{grid-template-columns:1fr}.row{grid-template-columns:36px 1fr}.score{grid-column:2;text-align:left}.metrics,.components,.audit{grid-column:1/3}.metrics,.auditGrid{grid-template-columns:1fr}.name{max-width:100%}.auditPanel{min-width:0}}"""
+APP = """const fmt=(x,d=1)=>x==null?'--':Number(x).toFixed(d);const pct=x=>x==null?'--':(x*100).toFixed(1)+'%';const rate=x=>x==null?'--':(x*100).toFixed(2)+'%';const money=x=>x==null?'--':'$'+Number(x).toFixed(2);const big=x=>x==null?'--':(Math.abs(Number(x))>=1e9?'$'+(Number(x)/1e9).toFixed(2)+'B':Math.abs(Number(x))>=1e6?'$'+(Number(x)/1e6).toFixed(2)+'M':'$'+Number(x).toFixed(2));const dt=x=>x?new Date(x).toLocaleString():'--';const esc=x=>String(x??'--').replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[m]));const statusMap={rankable:'可排名',not_in_mvp_candidate_set:'候选池外',sector_model_limit:'行业模型暂不覆盖',fails_current_screen:'未通过当前筛选',insufficient_financial_data:'财务资料不足'};const statusText=r=>statusMap[r.status]||'待检查';const badge=r=>r.status==='rankable'?'ok':r.status==='insufficient_financial_data'?'warn':'muted';const comp=r=>`折价 ${fmt(r.discount_score)} / 巴菲特 ${fmt(r.buffett_score)} / 护城河 ${fmt(r.moat_score)} / 林奇 ${fmt(r.lynch_score)} / 费雪 ${fmt(r.fisher_score)} / 数据 ${fmt(r.data_score)}`;
+function macro(m){const s=m.market_context?.shiller_pe;const f=m.market_context?.cnn_fear_greed;const err=(m.market_context?.errors||[]).length;return `<div class=tile><div class=label>S&P 500 Shiller PE</div><div class=big>${s?fmt(s.value,2):'--'}</div><div class=sub>${esc(s?.as_of||'未获取')} · Multpl</div></div><div class=tile><div class=label>CNN Fear & Greed</div><div class=big>${f?fmt(f.value,1):'--'}</div><div class=sub>${esc(f?.rating||'未获取')} · ${f?.as_of?dt(f.as_of):'CNN'}</div></div><div class=tile><div class=label>本次刷新</div><div class=big>${m.rankable_companies}/${m.processed_companies}</div><div class=sub>可排名 / 覆盖公司${err?` · 宏观源错误 ${err}`:''}</div></div>`}
+function factRows(facts){const rows=Object.entries(facts||{}).slice(0,16);if(!rows.length)return '<p class=muted>当前快照暂无逐字段 SEC tag 审计；下一次 SEC bulk 快照刷新后自动补齐。</p>';return `<table class=auditFacts><thead><tr><th>字段</th><th>SEC tag</th><th>值</th><th>期间</th><th>Filed</th><th>Accn</th></tr></thead><tbody>${rows.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${esc(v.tag)}</td><td class=num>${big(v.value)}</td><td>${esc([v.form,v.fy,v.fp].filter(Boolean).join(' '))}<br><span class=sub>${esc(v.start||'')} ${v.end?'→ '+esc(v.end):''}</span></td><td>${esc(v.filed)}</td><td>${esc(v.accn)}</td></tr>`).join('')}</tbody></table>`}
+function scenarioRows(s){const rows=Object.entries(s||{});if(!rows.length)return '<p class=muted>本行业或本公司数据不足，未生成通用 owner-earnings DCF。</p>';return `<table class=auditFacts><thead><tr><th>情景</th><th>权重</th><th>增长</th><th>折现率</th><th>永续增长</th><th>每股价值</th></tr></thead><tbody>${rows.map(([k,v])=>`<tr><td>${esc(k)}</td><td class=num>${pct(v.weight)}</td><td class=num>${pct(v.growth)}</td><td class=num>${pct(v.discount_rate)}</td><td class=num>${pct(v.terminal_growth)}</td><td class=num>${money(v.per_share)}</td></tr>`).join('')}</tbody></table>`}
+function audit(r){const a=r.audit||{};const q=a.quality_checks||{};const v=a.valuation||{};const oi=a.owner_earnings||{};const sb=a.score_breakdown||{};const c=sb.components||{};const src=a.data_sources||{};const missing=(q.missing_inputs||[]).slice(0,12).map(esc).join(', ')||'无关键缺口';const notes=(q.source_notes||[]).filter(Boolean).map(x=>`<li>${esc(x)}</li>`).join('')||'<li>无</li>';const risks=(q.risk_tags||[]).filter(Boolean).map(x=>`<li>${esc(x)}</li>`).join('')||'<li>无</li>';return `<div class=auditPanel><div class=auditGrid><div><h3>数据来源</h3><p>财务：${esc(src.financials)}<br>SEC 快照：${esc(src.snapshot_generated_at)}<br>价格：${esc(src.price)}<br>市场时间：${esc(src.market_time)}</p><p class=muted>${esc(a.source_quality?.note||a.source_quality?.status||'')}</p></div><div><h3>Owner earnings</h3><p>公式：${esc(oi.formula)}<br>结果：${big(oi.value)}<br>CFO：${big(oi.inputs?.cfo)} · Capex：${big(oi.inputs?.capex)}<br>NI：${big(oi.inputs?.net_income)} · D&A：${big(oi.inputs?.depreciation_amortization)}</p></div><div><h3>模型输入</h3><p>股价：${money(v.inputs?.price)} · 股数：${fmt(v.inputs?.shares,0)}<br>现金：${big(v.inputs?.cash)} · 债务：${big(v.inputs?.debt)}<br>收入 CAGR：${rate(v.inputs?.revenue_cagr_3y)}<br>缺口：${esc(missing)}</p></div><div><h3>分数拆解</h3><p>${esc(sb.value_formula)}<br>${esc(sb.growth_formula)}</p><p>折价 ${fmt(c.discount_score)} · 巴菲特 ${fmt(c.buffett_score)} · 护城河 ${fmt(c.moat_score)} · 林奇 ${fmt(c.lynch_score)} · 费雪 ${fmt(c.fisher_score)} · 数据 ${fmt(c.data_score)}</p></div></div><h3>DCF 三情景</h3>${scenarioRows(v.scenarios)}<h3>SEC 字段追溯</h3>${factRows(a.sec_facts)}<div class=auditGrid><div><h3>来源备注</h3><ul>${notes}</ul></div><div><h3>风险标签</h3><ul>${risks}</ul></div></div></div>`}
+function card(r,i){const cls=(r.fair_value_gap??0)>=0?'pos':'neg';const score=r.value_rank_score??r.growth_rank_score;return `<div class=row><div class=rank>${i+1}</div><div><div class=ticker>${esc(r.ticker)}</div><div class=name>${esc(r.name)}</div></div><div class=score><b>${fmt(score)}</b><div class="gap ${cls}">${pct(r.fair_value_gap)}</div></div><div class=metrics><div class=metric><span>最新价格</span><b>${money(r.price)}</b></div><div class=metric><span>加权公允价值</span><b>${money(r.fair_value)}</b></div><div class=metric><span>价值分</span><b>${fmt(r.value_rank_score)}</b></div><div class=metric><span>成长分</span><b>${fmt(r.growth_rank_score)}</b></div></div><div class=components>${comp(r)}</div><details class=audit><summary>审计明细</summary>${audit(r)}</details></div>`}
+function table(rows){return `<div class=table><table><thead><tr><th>代码</th><th>公司</th><th>行业</th><th>最新价格</th><th>加权公允价值</th><th>折价</th><th>价值分</th><th>成长分</th><th>巴菲特</th><th>护城河</th><th>林奇</th><th>费雪</th><th>数据</th><th>状态</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${esc(r.ticker)}</b><details class=audit><summary>审计</summary>${audit(r)}</details></td><td>${esc(r.name)}<br><span class=sub>${esc(r.price_source||'')}</span></td><td>${esc(r.sector)}</td><td class=num>${money(r.price)}</td><td class=num>${money(r.fair_value)}</td><td class=num>${pct(r.fair_value_gap)}</td><td class=num>${fmt(r.value_rank_score)}</td><td class=num>${fmt(r.growth_rank_score)}</td><td class=num>${fmt(r.buffett_score)}</td><td class=num>${fmt(r.moat_score)}</td><td class=num>${fmt(r.lynch_score)}</td><td class=num>${fmt(r.fisher_score)}</td><td class=num>${fmt(r.data_score)}</td><td><span class="badge ${badge(r)}">${statusText(r)}</span></td></tr>`).join('')}</tbody></table></div>`}
+fetch('data/latest_rankings.json').then(r=>r.json()).then(d=>{document.getElementById('stamp').textContent=`更新：${new Date(d.metadata.generated_at).toLocaleString()} · 快照：${d.metadata.fundamentals_snapshot_generated_at||'live SEC'}`;document.getElementById('macro').innerHTML=macro(d.metadata);document.getElementById('value').innerHTML=d.value_top_10.map(card).join('');document.getElementById('growth').innerHTML=d.growth_top_10.map(card).join('');const all=d.companies.slice().sort((a,b)=>(b.status==='rankable')-(a.status==='rankable')||(b.value_rank_score??b.growth_rank_score??-1)-(a.value_rank_score??a.growth_rank_score??-1));const render=rows=>document.getElementById('all').innerHTML=table(rows);render(all);document.getElementById('q').addEventListener('input',e=>{const q=e.target.value.toLowerCase();render(all.filter(r=>[r.ticker,r.name,r.sector,r.industry,statusText(r)].join(' ').toLowerCase().includes(q)))})});"""
+
+
+def build(payload: dict[str, Any]) -> None:
+    if DIST.exists():
+        for path in sorted(DIST.rglob("*"), reverse=True):
+            path.unlink() if path.is_file() else path.rmdir()
+    (DIST / "assets").mkdir(parents=True, exist_ok=True)
+    (DIST / "data").mkdir(parents=True, exist_ok=True)
+    (DIST / "index.html").write_text(INDEX, encoding="utf-8")
+    (DIST / "assets" / "styles.css").write_text(CSS, encoding="utf-8")
+    (DIST / "assets" / "app.js").write_text(APP, encoding="utf-8")
+    (DIST / "data" / "latest_rankings.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    (DIST / ".nojekyll").write_text("", encoding="utf-8")
+    (DIST / "manifest.json").write_text(json.dumps({"built_at": datetime.now(timezone.utc).isoformat(), **payload["metadata"]}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def validate_payload(payload: dict[str, Any]) -> None:
+    meta = payload["metadata"]
+    if meta["processed_companies"] < 450:
+        raise SystemExit(f"Refusing to deploy incomplete universe: {meta['processed_companies']} processed")
+    if meta["rankable_companies"] < 20:
+        raise SystemExit(f"Refusing to deploy empty or low-quality rankings: {meta['rankable_companies']} rankable")
+    if len(payload["value_top_10"]) < 10 or len(payload["growth_top_10"]) < 10:
+        raise SystemExit("Refusing to deploy incomplete top-10 lists")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--sleep", type=float, default=0.05)
+    args = parser.parse_args()
+    payload = run(args.limit, args.sleep)
+    validate_payload(payload)
+    build(payload)
+    m = payload["metadata"]
+    print(f"Built S&P 500 monitor: {m['rankable_companies']} rankable / {m['processed_companies']} processed")
+
+
+if __name__ == "__main__":
+    main()
