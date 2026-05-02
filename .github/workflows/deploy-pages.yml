@@ -9,8 +9,7 @@ on:
   push:
     branches: ["main"]
     paths-ignore:
-      - ".github/workflows/deploy-pages.yml"
-      - ".github/workflows/import-snapshot.yml"
+      - ".github/workflows/**"
 
 permissions:
   contents: read
